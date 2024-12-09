@@ -1,18 +1,18 @@
 <?php
 
-namespace notamedia\sentry\tests\unit;
+namespace silinternational\sentry\tests\unit;
 
+use Codeception\Test\Unit;
+use ReflectionClass;
+use RuntimeException;
+use Sentry\ClientInterface;
 use Sentry\Event;
 use Sentry\EventHint;
 use Sentry\EventId;
-use yii\log\Logger;
-use ReflectionClass;
-use RuntimeException;
 use Sentry\SentrySdk;
 use Sentry\State\Scope;
-use Codeception\Test\Unit;
-use Sentry\ClientInterface;
-use notamedia\sentry\SentryTarget;
+use silinternational\sentry\SentryTarget;
+use yii\log\Logger;
 
 /**
  * Unit-tests for SentryTarget
@@ -94,13 +94,13 @@ class SentryTargetTest extends Unit
 
         $client = $this->createMock(ClientInterface::class);
         $client->expects($this->once())
-               ->method('captureEvent')
-               ->willReturnCallback(function (Event $event, ?EventHint $hint = null, ?Scope $scope = null) use ($expectedMessageText, &$messageWasSent): ?EventId {
-                   $messageWasSent = true;
-                   $this->assertSame($expectedMessageText, $event->getMessage());
+            ->method('captureEvent')
+            ->willReturnCallback(function (Event $event, ?EventHint $hint = null, ?Scope $scope = null) use ($expectedMessageText, &$messageWasSent): ?EventId {
+                $messageWasSent = true;
+                $this->assertSame($expectedMessageText, $event->getMessage());
 
-                   return EventId::generate();
-               });
+                return EventId::generate();
+            });
 
         SentrySdk::getCurrentHub()->bindClient($client);
 

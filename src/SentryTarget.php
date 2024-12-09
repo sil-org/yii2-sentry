@@ -4,7 +4,7 @@
  * file that was distributed with this source code.
  */
 
-namespace notamedia\sentry;
+namespace silinternational\sentry;
 
 use Sentry\ClientBuilder;
 use Sentry\Event;
@@ -113,7 +113,8 @@ class SentryTarget extends Target
                 if ($user && ($identity = $user->getIdentity(false))) {
                     $data['userData']['id'] = $identity->getId();
                 }
-            } catch (Throwable $e) {}
+            } catch (Throwable $e) {
+            }
 
             \Sentry\withScope(function (Scope $scope) use ($text, $level, $data) {
                 if (is_array($text)) {
@@ -138,7 +139,7 @@ class SentryTarget extends Target
 
                     $data['extra'] = $text;
                 } else {
-                    $data['message'] = (string) $text;
+                    $data['message'] = (string)$text;
                 }
 
                 if ($this->context) {
@@ -149,7 +150,7 @@ class SentryTarget extends Target
 
                 $scope->setUser($data['userData']);
                 foreach ($data['extra'] as $key => $value) {
-                    $scope->setExtra((string) $key, $value);
+                    $scope->setExtra((string)$key, $value);
                 }
                 foreach ($data['tags'] as $key => $value) {
                     if ($value) {
@@ -192,11 +193,11 @@ class SentryTarget extends Target
     /**
      * Returns the text display of the specified level for the Sentry.
      *
-     * @deprecated Deprecated from 1.5, will remove in 2.0
-     *
      * @param int $level The message level, e.g. [[LEVEL_ERROR]], [[LEVEL_WARNING]].
      *
      * @return string
+     * @deprecated Deprecated from 1.5, will remove in 2.0
+     *
      */
     public static function getLevelName($level)
     {

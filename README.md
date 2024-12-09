@@ -1,14 +1,9 @@
 # [Sentry](https://sentry.io) logger for Yii2
 
-[![Build Status](https://travis-ci.org/notamedia/yii2-sentry.svg)](https://travis-ci.org/notamedia/yii2-sentry)
-[![Latest Stable Version](https://poser.pugx.org/notamedia/yii2-sentry/v/stable)](https://packagist.org/packages/notamedia/yii2-sentry) 
-[![Total Downloads](https://poser.pugx.org/notamedia/yii2-sentry/downloads)](https://packagist.org/packages/notamedia/yii2-sentry) 
-[![License](https://poser.pugx.org/notamedia/yii2-sentry/license)](https://packagist.org/packages/notamedia/yii2-sentry)
-
 ## Installation
 
 ```bash
-composer require notamedia/yii2-sentry
+composer require silinternational/yii2-sentry
 ```
 
 Add target class in the application config:
@@ -20,7 +15,7 @@ return [
 		    'traceLevel' => YII_DEBUG ? 3 : 0,
 		    'targets' => [
 			    [
-				    'class' => 'notamedia\sentry\SentryTarget',
+				    'class' => 'silinternational\sentry\SentryTarget',
 				    'dsn' => 'http://2682ybvhbs347:235vvgy465346@sentry.io/1',
 				    'levels' => ['error', 'warning'],
 				    // Write the context information (the default is true):
@@ -54,11 +49,11 @@ Writing messages with extra data:
 ### Extra callback
 
 `extraCallback` property can modify extra's data as callable function:
- 
+
 ```php
     'targets' => [
         [
-            'class' => 'notamedia\sentry\SentryTarget',
+            'class' => 'silinternational\sentry\SentryTarget',
             'dsn' => 'http://2682ybvhbs347:235vvgy465346@sentry.io/1',
             'levels' => ['error', 'warning'],
             'context' => true, // Write the context information. The default is true.
@@ -73,7 +68,9 @@ Writing messages with extra data:
 
 ### Tags
 
-Writing messages with additional tags. If need to add additional tags for event, add `tags` key in message. Tags are various key/value pairs that get assigned to an event, and can later be used as a breakdown or quick access to finding related events.
+Writing messages with additional tags. If need to add additional tags for event, add `tags` key in message. Tags are
+various key/value pairs that get assigned to an event, and can later be used as a breakdown or quick access to finding
+related events.
 
 Example:
 
@@ -91,8 +88,10 @@ More about tags see https://docs.sentry.io/learn/context/#tagging-events
 
 ### Additional context
 
-You can add additional context (such as user information, fingerprint, etc) by calling `\Sentry\configureScope()` before logging.
+You can add additional context (such as user information, fingerprint, etc) by calling `\Sentry\configureScope()` before
+logging.
 For example in main configuration on `beforeAction` event (real place will dependant on your project):
+
 ```php
 return [
     // ...
