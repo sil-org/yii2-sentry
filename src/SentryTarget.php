@@ -126,6 +126,9 @@ class SentryTarget extends Target
                         $data['message'] = (string)$text['message'];
                         unset($text['message']);
                     }
+                    if (!isset($text['message'])) {
+                        $data['message'] = json_encode($text);
+                    }
 
                     if (isset($text['tags'])) {
                         $data['tags'] = ArrayHelper::merge($data['tags'], $text['tags']);
