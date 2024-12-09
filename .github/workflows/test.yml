@@ -1,0 +1,19 @@
+name: Test and Publish
+
+on:
+  push:
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(vars.DEFAULT_JOB_TIMEOUT_MINUTES) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Test
+        run: |
+          composer self-update && composer --version
+          composer install --prefer-dist --no-interaction
+          composer exec codecept build -v
+          composer test -v
