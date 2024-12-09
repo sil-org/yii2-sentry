@@ -1,6 +1,6 @@
 <?php
 
-namespace silinternational\sentry\tests\unit;
+namespace Sil\Sentry\tests\unit;
 
 use Codeception\Test\Unit;
 use ReflectionClass;
@@ -11,7 +11,7 @@ use Sentry\EventHint;
 use Sentry\EventId;
 use Sentry\SentrySdk;
 use Sentry\State\Scope;
-use silinternational\sentry\SentryTarget;
+use Sil\Sentry\SentryTarget;
 use yii\log\Logger;
 
 /**

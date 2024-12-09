@@ -35,7 +35,7 @@ $application = new \yii\web\Application([
                     'class' => \yii\log\FileTarget::class,
                 ],
                 [
-                    'class' => \silinternational\sentry\SentryTarget::class,
+                    'class' => \Sil\Sentry\SentryTarget::class,
                     'dsn' => $params['sentryDsn'],
                 ],
             ],

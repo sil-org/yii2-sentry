@@ -4,7 +4,7 @@
  * file that was distributed with this source code.
  */
 
-namespace silinternational\sentry;
+namespace Sil\Sentry;
 
 use Sentry\ClientBuilder;
 use Sentry\Event;

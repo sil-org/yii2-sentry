@@ -15,7 +15,7 @@ return [
 		    'traceLevel' => YII_DEBUG ? 3 : 0,
 		    'targets' => [
 			    [
-				    'class' => 'silinternational\sentry\SentryTarget',
+				    'class' => 'Sil\Sentry\SentryTarget',
 				    'dsn' => 'http://2682ybvhbs347:235vvgy465346@sentry.io/1',
 				    'levels' => ['error', 'warning'],
 				    // Write the context information (the default is true):
@@ -53,7 +53,7 @@ Writing messages with extra data:
 ```php
     'targets' => [
         [
-            'class' => 'silinternational\sentry\SentryTarget',
+            'class' => 'Sil\Sentry\SentryTarget',
             'dsn' => 'http://2682ybvhbs347:235vvgy465346@sentry.io/1',
             'levels' => ['error', 'warning'],
             'context' => true, // Write the context information. The default is true.
