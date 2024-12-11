@@ -47,6 +47,10 @@ class SentryTarget extends Target
      * @var callable Callback function that can modify extra's array
      */
     public $extraCallback;
+    /**
+     * @var callable Callback function that can add tags
+     */
+    public $tagCallback;
 
     /**
      * @inheritDoc
@@ -159,6 +163,7 @@ class SentryTarget extends Target
 
                 $scope->setUser($data['userData']);
                 $scope->setContext('yii2-sentry', $data['context']);
+                $data = $this->runTagCallback($data);
                 foreach ($data['tags'] as $key => $value) {
                     if ($value) {
                         $scope->setTag($key, $value);
@@ -194,6 +199,21 @@ class SentryTarget extends Target
             $data['extra'] = call_user_func($this->extraCallback, $text, $data['extra'] ?? []);
         }
 
+        return $data;
+    }
+
+    /**
+     * Calls the tag callback if it exists
+     *
+     * @param array $data
+     *
+     * @return array
+     */
+    public function runTagCallback($data)
+    {
+        if (is_callable($this->tagCallback)) {
+            $data['tags'] = call_user_func($this->tagCallback, $data['tags'] ?? []);
+        }
         return $data;
     }
 
