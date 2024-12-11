@@ -126,7 +126,12 @@ class SentryTarget extends Target
                         $data['message'] = (string)$text['message'];
                         unset($text['message']);
                     }
-                    if (!isset($text['message'])) {
+                    if (isset($text['error'])) {
+                        $data['message'] = (string)$text['error'];
+                        unset($text['message']);
+                    }
+                    // if none of the above have text, stringify the object
+                    if (!isset($data['message'])) {
                         $data['message'] = json_encode($text);
                     }
 

@@ -79,6 +79,8 @@ class SentryTargetTest extends Unit
 
         yield [$msg, ['msg' => $msg]];
 
+        yield [$msg, ['error' => $msg]];
+
         yield [$msg, ['message' => $msg]];
 
         yield [$msg, ['message' => $msg, 'msg' => 'Ignored']];

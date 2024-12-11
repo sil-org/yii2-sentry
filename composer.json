@@ -38,5 +38,11 @@
   "scripts": {
     "test": "codecept run",
     "e2e": "php tests/sentry-fill"
+  },
+  "config": {
+    "allow-plugins": {
+      "php-http/discovery": false,
+      "yiisoft/yii2-composer": false
+    }
   }
 }
