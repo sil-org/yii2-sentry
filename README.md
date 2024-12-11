@@ -84,6 +84,22 @@ Example:
 ], 'category');
 ```
 
+If all messages need the same tag, use tagCallback in SentryTarget config:
+
+```php
+    'targets' => [
+        [
+            'class' => 'Sil\Sentry\SentryTarget',
+            'dsn' => 'https://11111111111111111111111111111111@11111111111111111.ingest.us.sentry.io/1111111111111111',
+            'levels' => ['error', 'warning'],
+            'tagCallback' => function ($tags) {
+                $tags['foo'] = 'bar';
+                return $tags;
+            },
+        ],
+    ],
+```
+
 More about tags see https://docs.sentry.io/learn/context/#tagging-events
 
 ### Additional context
