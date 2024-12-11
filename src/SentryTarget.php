@@ -98,6 +98,7 @@ class SentryTarget extends Target
             $data = [
                 'message' => '',
                 'tags' => ['category' => $category],
+                'context' => [],
                 'extra' => [],
                 'userData' => [],
             ];
@@ -128,7 +129,7 @@ class SentryTarget extends Target
                     }
                     if (isset($text['error'])) {
                         $data['message'] = (string)$text['error'];
-                        unset($text['message']);
+                        unset($text['error']);
                     }
                     // if none of the above have text, stringify the object
                     if (!isset($data['message'])) {
@@ -145,7 +146,7 @@ class SentryTarget extends Target
                         unset($text['exception']);
                     }
 
-                    $data['extra'] = $text;
+                    $data['context'] = $text;
                 } else {
                     $data['message'] = (string)$text;
                 }
@@ -157,8 +158,8 @@ class SentryTarget extends Target
                 $data = $this->runExtraCallback($text, $data);
 
                 $scope->setUser($data['userData']);
-                foreach ($data['extra'] as $key => $value) {
-                    $scope->setExtra((string)$key, $value);
+                foreach ($data['context'] as $key => $value) {
+                    $scope->setContext((string)$key, $value);
                 }
                 foreach ($data['tags'] as $key => $value) {
                     if ($value) {
