@@ -158,9 +158,7 @@ class SentryTarget extends Target
                 $data = $this->runExtraCallback($text, $data);
 
                 $scope->setUser($data['userData']);
-                foreach ($data['context'] as $key => $value) {
-                    $scope->setContext((string)$key, $value);
-                }
+                $scope->setContext('yii2-sentry', $data['context']);
                 foreach ($data['tags'] as $key => $value) {
                     if ($value) {
                         $scope->setTag($key, $value);
