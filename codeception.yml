@@ -1,10 +1,12 @@
-actor: Tester
+actor_suffix: Tester
+namespace: Tests
+support_namespace: Support
 bootstrap: bootstrap.php
 paths:
     tests: tests
     output: tests/_output
-    data: tests/_data
-    support: tests/_support
+    data: tests/Support/Data
+    support: tests/Support
     envs: tests/_envs
 settings:
     colors: true

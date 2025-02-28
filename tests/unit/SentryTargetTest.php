@@ -1,6 +1,6 @@
 <?php
 
-namespace Sil\Sentry\tests\unit;
+namespace Sil\Sentry\tests\Unit;
 
 use Codeception\Test\Unit;
 use ReflectionClass;
