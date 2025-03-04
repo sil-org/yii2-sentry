@@ -5,4 +5,4 @@ modules:
         configFile: 'tests/unit/config.php'
         part: init
     - Asserts
-    - \Helper\Unit
+    - Tests\Support\Helper\Unit
