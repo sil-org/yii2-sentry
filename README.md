@@ -11,20 +11,20 @@ Add target class in the application config:
 ```php
 return [
     'components' => [
-	    'log' => [
-		    'traceLevel' => YII_DEBUG ? 3 : 0,
-		    'targets' => [
-			    [
-				    'class' => 'Sil\Sentry\SentryTarget',
-				    'dsn' => 'http://2682ybvhbs347:235vvgy465346@sentry.io/1',
-				    'levels' => ['error', 'warning'],
-				    // Write the context information (the default is true):
-				    'context' => true,
-				    // Additional options for `Sentry\init`:
-				    'clientOptions' => ['release' => 'my-project-name@2.3.12']
-			    ],
-		    ],
-	    ],
+        'log' => [
+            'traceLevel' => YII_DEBUG ? 3 : 0,
+            'targets' => [
+                [
+                    'class' => 'Sil\Sentry\SentryTarget',
+                    'dsn' => 'http://2682ybvhbs347:235vvgy465346@sentry.io/1',
+                    'levels' => ['error', 'warning'],
+                    // Write the context information (the default is true):
+                    'context' => true,
+                    // Additional options for `Sentry\init`:
+                    'clientOptions' => ['release' => 'my-project-name@2.3.12']
+                ],
+            ],
+        ],
     ],
 ];
 ```
