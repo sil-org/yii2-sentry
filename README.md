@@ -3,7 +3,7 @@
 ## Installation
 
 ```bash
-composer require silinternational/yii2-sentry
+composer require sil-org/yii2-sentry
 ```
 
 Add target class in the application config:
