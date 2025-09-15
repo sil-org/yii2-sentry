@@ -1,5 +1,5 @@
 {
-  "name": "silinternational/yii2-sentry",
+  "name": "sil-org/yii2-sentry",
   "description": "Yii2 logger for Sentry",
   "keywords": [
     "sentry",
