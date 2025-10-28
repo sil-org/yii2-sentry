@@ -1,2 +1,2 @@
 install:
-	docker run --rm -v .:/data -w /data silintl/php8:8.3 composer install
+	docker run --rm -v .:/data -w /data ghcr.io/sil-org/php8:8.3 composer install
