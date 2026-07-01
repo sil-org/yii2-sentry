@@ -32,7 +32,7 @@ class SentryTargetTest extends Unit
      */
     public function testGetContextMessage()
     {
-        $class = new ReflectionClass(SentryTarget::className());
+        $class = new ReflectionClass(SentryTarget::class);
         $method = $class->getMethod('getContextMessage');
         $method->setAccessible(true);
 
@@ -125,7 +125,7 @@ class SentryTargetTest extends Unit
             'debug',
         ];
 
-        $loggerClass = new ReflectionClass(Logger::className());
+        $loggerClass = new ReflectionClass(Logger::class);
         $loggerLevelConstants = $loggerClass->getConstants();
         foreach ($loggerLevelConstants as $constant => $value) {
             if (strpos($constant, 'LEVEL_') === 0) {
