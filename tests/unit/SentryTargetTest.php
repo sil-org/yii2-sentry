@@ -275,6 +275,51 @@ class SentryTargetTest extends Unit
     }
 
     /**
+     * extraCallback gets the logged value without the message, tags and exception keys,
+     * and tagCallback can change the tags.
+     * @see SentryTarget::runExtraCallback
+     * @see SentryTarget::runTagCallback
+     */
+    public function testCallbacks()
+    {
+        $sentryTarget = $this->getConfiguredSentryTarget();
+        $extraCallbackText = null;
+        $sentryTarget->extraCallback = function ($text, $extra) use (&$extraCallbackText) {
+            $extraCallbackText = $text;
+            return $extra;
+        };
+        $sentryTarget->tagCallback = function ($tags) {
+            $tags['foo'] = 'bar';
+            unset($tags['removed']);
+            return $tags;
+        };
+        $messageWasSent = false;
+
+        $client = $this->createClientMock();
+        $client->expects($this->once())
+            ->method('captureEvent')
+            ->willReturnCallback(function (Event $event, ?EventHint $hint = null, ?Scope $scope = null) use (&$messageWasSent): ?EventId {
+                $messageWasSent = true;
+                $tags = $scope->applyToEvent($event)->getTags();
+                $this->assertSame(['category' => 'application', 'given' => 'yes', 'foo' => 'bar'], $tags);
+
+                return EventId::generate();
+            });
+
+        SentrySdk::getCurrentHub()->bindClient($client);
+
+        $logData = [
+            'message' => 'A message with callbacks',
+            'tags' => ['given' => 'yes', 'removed' => 'yes'],
+            'exception' => new RuntimeException('Boom'),
+            'action' => 'create',
+        ];
+        $sentryTarget->collect([[$logData, Logger::LEVEL_INFO, 'application', 1481513561.197593, []]], true);
+        $this->assertTrue($messageWasSent);
+        $this->assertSame(['action' => 'create'], $extraCallbackText);
+    }
+
+    /**
      * A message that fails to export is reported, and does not stop the rest of the batch.
      * @see SentryTarget::export
      */
