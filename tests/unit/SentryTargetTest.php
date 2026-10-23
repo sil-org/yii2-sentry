@@ -21,6 +21,8 @@ use yii\log\Logger;
  */
 class SentryTargetTest extends Unit
 {
+    private const VALIDATION_ERROR = 'Email is invalid';
+
     /** @var array test messages */
     protected $messages = [
         ['test', Logger::LEVEL_INFO, 'test', 1481513561.197593, []],
@@ -132,7 +134,7 @@ class SentryTargetTest extends Unit
                 $messageWasSent = true;
                 $this->assertSame('Validation failed', $event->getMessage());
                 $context = $scope->applyToEvent($event)->getContexts()['yii2-sentry'];
-                $this->assertSame(['email' => 'Email is invalid'], $context['error']);
+                $this->assertSame(['email' => self::VALIDATION_ERROR], $context['error']);
                 $this->assertSame('create', $context['action']);
 
                 return EventId::generate();
@@ -143,7 +145,7 @@ class SentryTargetTest extends Unit
         $logData = [
             'action' => 'create',
             'message' => 'Validation failed',
-            'error' => ['email' => 'Email is invalid'],
+            'error' => ['email' => self::VALIDATION_ERROR],
         ];
         $sentryTarget->collect([[$logData, Logger::LEVEL_INFO, 'application', 1481513561.197593, []]], true);
         $this->assertTrue($messageWasSent);
@@ -179,10 +181,10 @@ class SentryTargetTest extends Unit
     public function nonStringMessageDataProvider()
     {
         yield 'array under error' => [
-            ['action' => 'create', 'error' => ['email' => 'Email is invalid']],
+            ['action' => 'create', 'error' => ['email' => self::VALIDATION_ERROR]],
             '{"email":"Email is invalid"}',
             'array',
-            ['action' => 'create', 'error' => ['email' => 'Email is invalid']],
+            ['action' => 'create', 'error' => ['email' => self::VALIDATION_ERROR]],
         ];
 
         yield 'int under msg' => [['msg' => 42], '42', 'int', ['msg' => 42]];
@@ -238,7 +240,7 @@ class SentryTargetTest extends Unit
         $stringable = new class implements \Stringable {
             public function __toString(): string
             {
-                return 'A message';
+                return 'A Stringable message';
             }
         };
 
@@ -261,7 +263,7 @@ class SentryTargetTest extends Unit
             ->method('captureEvent')
             ->willReturnCallback(function (Event $event, ?EventHint $hint = null, ?Scope $scope = null): ?EventId {
                 $event = $scope->applyToEvent($event);
-                $this->assertSame('A message', $event->getMessage());
+                $this->assertSame('A Stringable message', $event->getMessage());
                 $this->assertArrayNotHasKey('log_message_type', $event->getTags());
 
                 return EventId::generate();
