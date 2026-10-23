@@ -138,17 +138,20 @@ class SentryTarget extends Target
 
         \Sentry\withScope(function (Scope $scope) use ($text, $level, $data) {
             if (is_array($text)) {
-                if (isset($text['msg'])) {
-                    $data['message'] = (string)$text['msg'];
-                    unset($text['msg']);
-                }
-                if (isset($text['message'])) {
-                    $data['message'] = (string)$text['message'];
-                    unset($text['message']);
-                }
-                if (isset($text['error'])) {
-                    $data['message'] = (string)$text['error'];
-                    unset($text['error']);
+                // The first key found is the message. Any others are left in the context,
+                // so that e.g. ['message' => '...', 'error' => [...]] keeps both.
+                $messageException = null;
+                foreach (['message', 'msg', 'error'] as $key) {
+                    if (isset($text[$key])) {
+                        $message = $text[$key];
+                        unset($text[$key]);
+                        if ($message instanceof Throwable) {
+                            $messageException = $message;
+                            $message = $message->getMessage();
+                        }
+                        $data['message'] = (string)$message;
+                        break;
+                    }
                 }
                 // if none of the above have text, stringify the object
                 if (!isset($data['message'])) {
@@ -163,6 +166,9 @@ class SentryTarget extends Target
                 if (isset($text['exception']) && $text['exception'] instanceof Throwable) {
                     $data['exception'] = $text['exception'];
                     unset($text['exception']);
+                }
+                if (!isset($data['exception']) && $messageException !== null) {
+                    $data['exception'] = $messageException;
                 }
 
                 $data['context'] = $text;

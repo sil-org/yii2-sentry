@@ -85,6 +85,10 @@ class SentryTargetTest extends Unit
         yield [$msg, ['message' => $msg]];
 
         yield [$msg, ['message' => $msg, 'msg' => 'Ignored']];
+
+        yield [$msg, ['msg' => $msg, 'error' => 'Ignored']];
+
+        yield [$msg, ['error' => 'Ignored', 'message' => $msg]];
     }
 
     /**
@@ -108,6 +112,66 @@ class SentryTargetTest extends Unit
         SentrySdk::getCurrentHub()->bindClient($client);
 
         $sentryTarget->collect([[$loggedMessage, Logger::LEVEL_INFO, 'application', 1481513561.197593, []]], true);
+        $this->assertTrue($messageWasSent);
+    }
+
+    /**
+     * Message keys that are not used as the message are kept in the context.
+     * @see SentryTarget::export
+     */
+    public function testUnusedMessageKeysAreKeptAsContext()
+    {
+        $sentryTarget = $this->getConfiguredSentryTarget();
+        $messageWasSent = false;
+
+        $client = $this->createClientMock();
+        $client->expects($this->once())
+            ->method('captureEvent')
+            ->willReturnCallback(function (Event $event, ?EventHint $hint = null, ?Scope $scope = null) use (&$messageWasSent): ?EventId {
+                $messageWasSent = true;
+                $this->assertSame('Validation failed', $event->getMessage());
+                $context = $scope->applyToEvent($event)->getContexts()['yii2-sentry'];
+                $this->assertSame(['email' => 'Email is invalid'], $context['error']);
+                $this->assertSame('create', $context['action']);
+
+                return EventId::generate();
+            });
+
+        SentrySdk::getCurrentHub()->bindClient($client);
+
+        $logData = [
+            'action' => 'create',
+            'message' => 'Validation failed',
+            'error' => ['email' => 'Email is invalid'],
+        ];
+        $sentryTarget->collect([[$logData, Logger::LEVEL_INFO, 'application', 1481513561.197593, []]], true);
+        $this->assertTrue($messageWasSent);
+    }
+
+    /**
+     * A Throwable used as the message is sent as the event's exception.
+     * @see SentryTarget::export
+     */
+    public function testThrowableMessage()
+    {
+        $sentryTarget = $this->getConfiguredSentryTarget();
+        $exception = new RuntimeException('Connection error');
+        $messageWasSent = false;
+
+        $client = $this->createMock(ClientInterface::class);
+        $client->expects($this->once())
+            ->method('captureEvent')
+            ->willReturnCallback(function (Event $event, ?EventHint $hint = null) use ($exception, &$messageWasSent): ?EventId {
+                $messageWasSent = true;
+                $this->assertSame('Connection error', $event->getMessage());
+                $this->assertSame($exception, $hint->exception);
+
+                return EventId::generate();
+            });
+
+        SentrySdk::getCurrentHub()->bindClient($client);
+
+        $sentryTarget->collect([[['msg' => $exception], Logger::LEVEL_INFO, 'dbms', 1481513561.197593, []]], true);
         $this->assertTrue($messageWasSent);
     }
 
