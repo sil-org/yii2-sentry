@@ -222,6 +222,46 @@ class SentryTargetTest extends Unit
     }
 
     /**
+     * If reporting an export failure also fails, it goes to PHP's error log, and the rest of the batch is still sent.
+     * @see SentryTarget::export
+     */
+    public function testExportFailureReportFailureIsLogged()
+    {
+        $sentryTarget = $this->getConfiguredSentryTarget();
+        $sentMessages = [];
+
+        $client = $this->createClientMock();
+        $client->method('captureException')->willThrowException(new RuntimeException('Sentry is down'));
+        $client->expects($this->once())
+            ->method('captureEvent')
+            ->willReturnCallback(function (Event $event) use (&$sentMessages): ?EventId {
+                $sentMessages[] = $event->getMessage();
+
+                return EventId::generate();
+            });
+
+        SentrySdk::getCurrentHub()->bindClient($client);
+
+        $errorLog = tempnam(sys_get_temp_dir(), 'sentry-target-test');
+        $previousErrorLog = ini_set('error_log', $errorLog);
+        try {
+            $sentryTarget->collect([
+                // an array tag value makes Scope::setTag() throw a TypeError
+                [['message' => 'Bad tags', 'tags' => ['foo' => ['bar']]], Logger::LEVEL_INFO, 'application', 1481513561.197593, []],
+                ['Good message', Logger::LEVEL_INFO, 'application', 1481513561.197593, []],
+            ], true);
+            $logged = file_get_contents($errorLog);
+        } finally {
+            ini_set('error_log', $previousErrorLog);
+            unlink($errorLog);
+        }
+
+        $this->assertStringContainsString('unable to export a log message', $logged);
+        $this->assertStringContainsString('Sentry is down', $logged);
+        $this->assertSame(['Good message'], $sentMessages);
+    }
+
+    /**
      * Testing method getLevelName()
      * - returns level name for each logger level
      * @see SentryTarget::getLevelName

@@ -100,7 +100,18 @@ class SentryTarget extends Target
             try {
                 $this->exportMessage($message);
             } catch (Throwable $e) {
-                $this->reportExportFailure($e, $message);
+                try {
+                    $this->reportExportFailure($e, $message);
+                } catch (Throwable $reportError) {
+                    // Sentry can't take the report either. Use PHP's error log, as throwing
+                    // would make Yii disable this target.
+                    error_log(sprintf(
+                        '%s: unable to export a log message (%s), or to report that to Sentry (%s)',
+                        static::class,
+                        $e->getMessage(),
+                        $reportError->getMessage()
+                    ));
+                }
             }
         }
     }
