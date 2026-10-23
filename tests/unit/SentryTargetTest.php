@@ -11,6 +11,7 @@ use Sentry\EventHint;
 use Sentry\EventId;
 use Sentry\Options;
 use Sentry\SentrySdk;
+use Sentry\Severity;
 use Sentry\State\Scope;
 use Sil\Sentry\SentryTarget;
 use yii\log\Logger;
@@ -173,6 +174,102 @@ class SentryTargetTest extends Unit
 
         $sentryTarget->collect([[['msg' => $exception], Logger::LEVEL_INFO, 'dbms', 1481513561.197593, []]], true);
         $this->assertTrue($messageWasSent);
+    }
+
+    public function nonStringMessageDataProvider()
+    {
+        yield 'array under error' => [
+            ['action' => 'create', 'error' => ['email' => 'Email is invalid']],
+            '{"email":"Email is invalid"}',
+            'array',
+            ['action' => 'create', 'error' => ['email' => 'Email is invalid']],
+        ];
+
+        yield 'int under msg' => [['msg' => 42], '42', 'int', ['msg' => 42]];
+
+        yield 'no message key' => [
+            ['one' => 'value 1', 'two' => 'value 2'],
+            '{"one":"value 1","two":"value 2"}',
+            'none',
+            ['one' => 'value 1', 'two' => 'value 2'],
+        ];
+
+        yield 'list' => [[1, 2, 3], '[1,2,3]', 'none', [1, 2, 3]];
+
+        yield 'int' => [42, '42', 'int', ['text' => 42]];
+
+        $object = new \stdClass();
+        yield 'object' => [$object, 'stdClass', 'stdClass', ['text' => $object]];
+    }
+
+    /**
+     * A log message that is not a string is converted to text, kept in the context, and tagged.
+     * @dataProvider nonStringMessageDataProvider
+     * @see SentryTarget::export
+     */
+    public function testNonStringMessageIsConverted($loggedMessage, $expectedMessage, $expectedType, $expectedContext)
+    {
+        $sentryTarget = $this->getConfiguredSentryTarget();
+        $messageWasSent = false;
+
+        $client = $this->createClientMock();
+        $client->expects($this->never())->method('captureException');
+        $client->expects($this->once())
+            ->method('captureEvent')
+            ->willReturnCallback(function (Event $event, ?EventHint $hint = null, ?Scope $scope = null) use ($expectedMessage, $expectedType, $expectedContext, &$messageWasSent): ?EventId {
+                $messageWasSent = true;
+                $event = $scope->applyToEvent($event);
+                $this->assertSame($expectedMessage, $event->getMessage());
+                $this->assertEquals(Severity::info(), $event->getLevel());
+                $this->assertSame($expectedType, $event->getTags()['log_message_type']);
+                $this->assertSame($expectedContext, $event->getContexts()['yii2-sentry']);
+
+                return EventId::generate();
+            });
+
+        SentrySdk::getCurrentHub()->bindClient($client);
+
+        $sentryTarget->collect([[$loggedMessage, Logger::LEVEL_INFO, 'application', 1481513561.197593, []]], true);
+        $this->assertTrue($messageWasSent);
+    }
+
+    public function validMessageDataProvider()
+    {
+        $stringable = new class implements \Stringable {
+            public function __toString(): string
+            {
+                return 'A message';
+            }
+        };
+
+        yield 'Stringable' => [$stringable];
+
+        yield 'Stringable under message' => [['message' => $stringable]];
+    }
+
+    /**
+     * Stringable messages are valid and are not reported.
+     * @dataProvider validMessageDataProvider
+     * @see SentryTarget::export
+     */
+    public function testStringableMessageIsNotReported($loggedMessage)
+    {
+        $sentryTarget = $this->getConfiguredSentryTarget();
+
+        $client = $this->createClientMock();
+        $client->expects($this->once())
+            ->method('captureEvent')
+            ->willReturnCallback(function (Event $event, ?EventHint $hint = null, ?Scope $scope = null): ?EventId {
+                $event = $scope->applyToEvent($event);
+                $this->assertSame('A message', $event->getMessage());
+                $this->assertArrayNotHasKey('log_message_type', $event->getTags());
+
+                return EventId::generate();
+            });
+
+        SentrySdk::getCurrentHub()->bindClient($client);
+
+        $sentryTarget->collect([[$loggedMessage, Logger::LEVEL_INFO, 'application', 1481513561.197593, []]], true);
     }
 
     /**

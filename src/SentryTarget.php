@@ -16,6 +16,7 @@ use Sentry\Integration\IntegrationInterface;
 use Sentry\SentrySdk;
 use Sentry\Severity;
 use Sentry\State\Scope;
+use Stringable;
 use Throwable;
 use Yii;
 use yii\helpers\ArrayHelper;
@@ -137,27 +138,10 @@ class SentryTarget extends Target
         }
 
         \Sentry\withScope(function (Scope $scope) use ($text, $level, $data) {
-            if (is_array($text)) {
-                // The first key found is the message. Any others are left in the context,
-                // so that e.g. ['message' => '...', 'error' => [...]] keeps both.
-                $messageException = null;
-                foreach (['message', 'msg', 'error'] as $key) {
-                    if (isset($text[$key])) {
-                        $message = $text[$key];
-                        unset($text[$key]);
-                        if ($message instanceof Throwable) {
-                            $messageException = $message;
-                            $message = $message->getMessage();
-                        }
-                        $data['message'] = (string)$message;
-                        break;
-                    }
-                }
-                // if none of the above have text, stringify the object
-                if (!isset($data['message'])) {
-                    $data['message'] = json_encode($text);
-                }
+            // the type of a message that is not a string, or 'none' if there is no message
+            $messageType = null;
 
+            if (is_array($text)) {
                 if (isset($text['tags'])) {
                     $data['tags'] = ArrayHelper::merge($data['tags'], $text['tags']);
                     unset($text['tags']);
@@ -167,13 +151,44 @@ class SentryTarget extends Target
                     $data['exception'] = $text['exception'];
                     unset($text['exception']);
                 }
-                if (!isset($data['exception']) && $messageException !== null) {
-                    $data['exception'] = $messageException;
+
+                // The first key found is the message. Any others are left in the context,
+                // so that e.g. ['message' => '...', 'error' => [...]] keeps both.
+                $messageKey = null;
+                foreach (['message', 'msg', 'error'] as $key) {
+                    if (isset($text[$key])) {
+                        $messageKey = $key;
+                        break;
+                    }
+                }
+
+                if ($messageKey === null) {
+                    $messageType = 'none';
+                    $data['message'] = $this->describeNonStringMessage($text);
+                } elseif ($text[$messageKey] instanceof Throwable) {
+                    $data['exception'] = $data['exception'] ?? $text[$messageKey];
+                    $data['message'] = $text[$messageKey]->getMessage();
+                    unset($text[$messageKey]);
+                } elseif (is_string($text[$messageKey]) || $text[$messageKey] instanceof Stringable) {
+                    $data['message'] = (string)$text[$messageKey];
+                    unset($text[$messageKey]);
+                } else {
+                    // Leave the value in the context, so that it still reaches Sentry.
+                    $messageType = get_debug_type($text[$messageKey]);
+                    $data['message'] = $this->describeNonStringMessage($text[$messageKey]);
                 }
 
                 $data['context'] = $text;
-            } else {
+            } elseif (is_string($text) || $text instanceof Stringable) {
                 $data['message'] = (string)$text;
+            } else {
+                $messageType = get_debug_type($text);
+                $data['message'] = $this->describeNonStringMessage($text);
+                $data['context'] = ['text' => $text];
+            }
+
+            if ($messageType !== null) {
+                $data['tags']['log_message_type'] = $messageType;
             }
 
             if ($this->context) {
@@ -203,6 +218,24 @@ class SentryTarget extends Target
                 ])));
             }
         });
+    }
+
+    /**
+     * Returns a text version of a log message that is not a string, to use as the event message.
+     *
+     * @param mixed $value
+     *
+     * @return string
+     */
+    protected function describeNonStringMessage($value): string
+    {
+        if (is_object($value)) {
+            return get_debug_type($value);
+        }
+
+        $json = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+
+        return $json === false ? get_debug_type($value) : $json;
     }
 
     /**
