@@ -59,6 +59,17 @@ passed in the `exception` key:
 ], 'category');
 ```
 
+### Non-string messages
+
+Like Yii's own log targets, SentryTarget accepts messages that are not strings. If the message (the logged value, or
+the value under `message`, `msg` or `error`) is not a string or `Stringable`, or an array has none of those keys:
+
+- The event message is the value encoded as JSON (or the class name, for an object).
+- The value is kept in the context.
+- The event gets a `log_message_type` tag set to the value's type, or `none` if there was no message key. Search
+  for this tag in Sentry to find log calls that don't pass a string message, for example before moving to
+  [PSR-3](https://www.php-fig.org/psr/psr-3/) logging.
+
 ### Extra callback
 
 `extraCallback` property can modify extra's data as callable function:
