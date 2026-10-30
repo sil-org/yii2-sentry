@@ -48,107 +48,93 @@ class SentryTargetTest extends Unit
 
     public function testExceptionPassing()
     {
-        $sentryTarget = $this->getConfiguredSentryTarget();
-
         $logData = [
             'message' => 'This exception was caught, but still needs to be reported',
             'exception' => new RuntimeException('Package loss detected'),
             'something_extra' => ['foo' => 'bar'],
         ];
 
-        $messageWasSent = false;
+        [$event, $hint] = $this->exportOne($logData);
 
-        $client = $this->createMock(ClientInterface::class);
-        $client->expects($this->once())
-            ->method('captureEvent')
-            ->willReturnCallback(function (Event $event, ?EventHint $hint = null, ?Scope $scope = null) use ($logData, &$messageWasSent): ?EventId {
-                $messageWasSent = true;
-                $this->assertSame($logData['exception'], $hint->exception);
-                $this->assertSame($logData['message'], $event->getMessage());
-
-                return EventId::generate();
-            });
-
-        SentrySdk::getCurrentHub()->bindClient($client);
-
-        $sentryTarget->collect([[$logData, Logger::LEVEL_INFO, 'application', 1481513561.197593, []]], true);
-        $this->assertTrue($messageWasSent);
+        $this->assertSame($logData['exception'], $hint->exception);
+        $this->assertSame($logData['message'], $event->getMessage());
     }
 
     public function messageDataProvider()
     {
         $msg = 'A message';
 
-        yield [$msg, $msg];
+        // logged value, expected message, expected context, expected log_message_type tag
+        yield 'string' => [$msg, $msg, [], null];
 
-        yield [$msg, ['msg' => $msg]];
+        yield 'msg' => [['msg' => $msg], $msg, [], null];
 
-        yield [$msg, ['error' => $msg]];
+        yield 'error' => [['error' => $msg], $msg, [], null];
 
-        yield [$msg, ['message' => $msg]];
+        yield 'message' => [['message' => $msg], $msg, [], null];
 
-        yield [$msg, ['message' => $msg, 'msg' => 'Ignored']];
+        yield 'message before msg' => [['message' => $msg, 'msg' => 'Ignored'], $msg, ['msg' => 'Ignored'], null];
 
-        yield [$msg, ['msg' => $msg, 'error' => 'Ignored']];
+        yield 'msg before error' => [['msg' => $msg, 'error' => 'Ignored'], $msg, ['error' => 'Ignored'], null];
 
-        yield [$msg, ['error' => 'Ignored', 'message' => $msg]];
+        yield 'message before error' => [['error' => 'Ignored', 'message' => $msg], $msg, ['error' => 'Ignored'], null];
+
+        yield 'message with error context' => [
+            ['action' => 'create', 'message' => 'Validation failed', 'error' => ['email' => self::VALIDATION_ERROR]],
+            'Validation failed',
+            ['action' => 'create', 'error' => ['email' => self::VALIDATION_ERROR]],
+            null,
+        ];
+
+        $stringable = new class implements \Stringable {
+            public function __toString(): string
+            {
+                return 'A Stringable message';
+            }
+        };
+
+        yield 'Stringable' => [$stringable, 'A Stringable message', [], null];
+
+        yield 'Stringable under message' => [['message' => $stringable], 'A Stringable message', [], null];
+
+        yield 'array under error' => [
+            ['action' => 'create', 'error' => ['email' => self::VALIDATION_ERROR]],
+            '{"email":"Email is invalid"}',
+            ['action' => 'create', 'error' => ['email' => self::VALIDATION_ERROR]],
+            'array',
+        ];
+
+        yield 'int under msg' => [['msg' => 42], '42', ['msg' => 42], 'int'];
+
+        yield 'no message key' => [
+            ['one' => 'value 1', 'two' => 'value 2'],
+            '{"one":"value 1","two":"value 2"}',
+            ['one' => 'value 1', 'two' => 'value 2'],
+            'none',
+        ];
+
+        yield 'list' => [[1, 2, 3], '[1,2,3]', [1, 2, 3], 'none'];
+
+        yield 'int' => [42, '42', ['text' => 42], 'int'];
+
+        $object = new \stdClass();
+        yield 'object' => [$object, 'stdClass', ['text' => $object], 'stdClass'];
     }
 
     /**
+     * The logged value is split into the event message and context. A message that is not a
+     * string is converted to text and tagged with its type.
      * @dataProvider messageDataProvider
-     */
-    public function testMessageConverting($expectedMessageText, $loggedMessage)
-    {
-        $sentryTarget = $this->getConfiguredSentryTarget();
-        $messageWasSent = false;
-
-        $client = $this->createMock(ClientInterface::class);
-        $client->expects($this->once())
-            ->method('captureEvent')
-            ->willReturnCallback(function (Event $event, ?EventHint $hint = null, ?Scope $scope = null) use ($expectedMessageText, &$messageWasSent): ?EventId {
-                $messageWasSent = true;
-                $this->assertSame($expectedMessageText, $event->getMessage());
-
-                return EventId::generate();
-            });
-
-        SentrySdk::getCurrentHub()->bindClient($client);
-
-        $sentryTarget->collect([[$loggedMessage, Logger::LEVEL_INFO, 'application', 1481513561.197593, []]], true);
-        $this->assertTrue($messageWasSent);
-    }
-
-    /**
-     * Message keys that are not used as the message are kept in the context.
      * @see SentryTarget::export
      */
-    public function testUnusedMessageKeysAreKeptAsContext()
+    public function testMessageConverting($loggedMessage, $expectedMessage, $expectedContext, $expectedType)
     {
-        $sentryTarget = $this->getConfiguredSentryTarget();
-        $messageWasSent = false;
+        [$event] = $this->exportOne($loggedMessage);
 
-        $client = $this->createClientMock();
-        $client->expects($this->once())
-            ->method('captureEvent')
-            ->willReturnCallback(function (Event $event, ?EventHint $hint = null, ?Scope $scope = null) use (&$messageWasSent): ?EventId {
-                $messageWasSent = true;
-                $this->assertSame('Validation failed', $event->getMessage());
-                $context = $scope->applyToEvent($event)->getContexts()['yii2-sentry'];
-                $this->assertSame(['email' => self::VALIDATION_ERROR], $context['error']);
-                $this->assertSame('create', $context['action']);
-
-                return EventId::generate();
-            });
-
-        SentrySdk::getCurrentHub()->bindClient($client);
-
-        $logData = [
-            'action' => 'create',
-            'message' => 'Validation failed',
-            'error' => ['email' => self::VALIDATION_ERROR],
-        ];
-        $sentryTarget->collect([[$logData, Logger::LEVEL_INFO, 'application', 1481513561.197593, []]], true);
-        $this->assertTrue($messageWasSent);
+        $this->assertSame($expectedMessage, $event->getMessage());
+        $this->assertEquals(Severity::info(), $event->getLevel());
+        $this->assertSame($expectedContext, $event->getContexts()['yii2-sentry'] ?? []);
+        $this->assertSame($expectedType, $event->getTags()['log_message_type'] ?? null);
     }
 
     /**
@@ -157,121 +143,44 @@ class SentryTargetTest extends Unit
      */
     public function testThrowableMessage()
     {
-        $sentryTarget = $this->getConfiguredSentryTarget();
         $exception = new RuntimeException('Connection error');
-        $messageWasSent = false;
 
-        $client = $this->createMock(ClientInterface::class);
-        $client->expects($this->once())
-            ->method('captureEvent')
-            ->willReturnCallback(function (Event $event, ?EventHint $hint = null) use ($exception, &$messageWasSent): ?EventId {
-                $messageWasSent = true;
-                $this->assertSame('Connection error', $event->getMessage());
-                $this->assertSame($exception, $hint->exception);
+        [$event, $hint] = $this->exportOne(['msg' => $exception]);
 
-                return EventId::generate();
-            });
-
-        SentrySdk::getCurrentHub()->bindClient($client);
-
-        $sentryTarget->collect([[['msg' => $exception], Logger::LEVEL_INFO, 'dbms', 1481513561.197593, []]], true);
-        $this->assertTrue($messageWasSent);
-    }
-
-    public function nonStringMessageDataProvider()
-    {
-        yield 'array under error' => [
-            ['action' => 'create', 'error' => ['email' => self::VALIDATION_ERROR]],
-            '{"email":"Email is invalid"}',
-            'array',
-            ['action' => 'create', 'error' => ['email' => self::VALIDATION_ERROR]],
-        ];
-
-        yield 'int under msg' => [['msg' => 42], '42', 'int', ['msg' => 42]];
-
-        yield 'no message key' => [
-            ['one' => 'value 1', 'two' => 'value 2'],
-            '{"one":"value 1","two":"value 2"}',
-            'none',
-            ['one' => 'value 1', 'two' => 'value 2'],
-        ];
-
-        yield 'list' => [[1, 2, 3], '[1,2,3]', 'none', [1, 2, 3]];
-
-        yield 'int' => [42, '42', 'int', ['text' => 42]];
-
-        $object = new \stdClass();
-        yield 'object' => [$object, 'stdClass', 'stdClass', ['text' => $object]];
+        $this->assertSame('Connection error', $event->getMessage());
+        $this->assertSame($exception, $hint->exception);
     }
 
     /**
-     * A log message that is not a string is converted to text, kept in the context, and tagged.
-     * @dataProvider nonStringMessageDataProvider
-     * @see SentryTarget::export
+     * extraCallback gets the logged value without the message, tags and exception keys,
+     * and tagCallback can change the tags.
+     * @see SentryTarget::runExtraCallback
+     * @see SentryTarget::runTagCallback
      */
-    public function testNonStringMessageIsConverted($loggedMessage, $expectedMessage, $expectedType, $expectedContext)
+    public function testCallbacks()
     {
         $sentryTarget = $this->getConfiguredSentryTarget();
-        $messageWasSent = false;
-
-        $client = $this->createClientMock();
-        $client->expects($this->never())->method('captureException');
-        $client->expects($this->once())
-            ->method('captureEvent')
-            ->willReturnCallback(function (Event $event, ?EventHint $hint = null, ?Scope $scope = null) use ($expectedMessage, $expectedType, $expectedContext, &$messageWasSent): ?EventId {
-                $messageWasSent = true;
-                $event = $scope->applyToEvent($event);
-                $this->assertSame($expectedMessage, $event->getMessage());
-                $this->assertEquals(Severity::info(), $event->getLevel());
-                $this->assertSame($expectedType, $event->getTags()['log_message_type']);
-                $this->assertSame($expectedContext, $event->getContexts()['yii2-sentry']);
-
-                return EventId::generate();
-            });
-
-        SentrySdk::getCurrentHub()->bindClient($client);
-
-        $sentryTarget->collect([[$loggedMessage, Logger::LEVEL_INFO, 'application', 1481513561.197593, []]], true);
-        $this->assertTrue($messageWasSent);
-    }
-
-    public function validMessageDataProvider()
-    {
-        $stringable = new class implements \Stringable {
-            public function __toString(): string
-            {
-                return 'A Stringable message';
-            }
+        $extraCallbackText = null;
+        $sentryTarget->extraCallback = function ($text, $extra) use (&$extraCallbackText) {
+            $extraCallbackText = $text;
+            return $extra;
+        };
+        $sentryTarget->tagCallback = function ($tags) {
+            $tags['foo'] = 'bar';
+            unset($tags['removed']);
+            return $tags;
         };
 
-        yield 'Stringable' => [$stringable];
+        $logData = [
+            'message' => 'A message with callbacks',
+            'tags' => ['given' => 'yes', 'removed' => 'yes'],
+            'exception' => new RuntimeException('Boom'),
+            'action' => 'create',
+        ];
+        [$event] = $this->exportOne($logData, $sentryTarget);
 
-        yield 'Stringable under message' => [['message' => $stringable]];
-    }
-
-    /**
-     * Stringable messages are valid and are not reported.
-     * @dataProvider validMessageDataProvider
-     * @see SentryTarget::export
-     */
-    public function testStringableMessageIsNotReported($loggedMessage)
-    {
-        $sentryTarget = $this->getConfiguredSentryTarget();
-
-        $client = $this->createClientMock();
-        $client->expects($this->once())
-            ->method('captureEvent')
-            ->willReturnCallback(function (Event $event, ?EventHint $hint = null, ?Scope $scope = null): ?EventId {
-                $event = $scope->applyToEvent($event);
-                $this->assertSame('A Stringable message', $event->getMessage());
-                $this->assertArrayNotHasKey('log_message_type', $event->getTags());
-
-                return EventId::generate();
-            });
-
-        SentrySdk::getCurrentHub()->bindClient($client);
-
-        $sentryTarget->collect([[$loggedMessage, Logger::LEVEL_INFO, 'application', 1481513561.197593, []]], true);
+        $this->assertSame(['category' => 'application', 'given' => 'yes', 'foo' => 'bar'], $event->getTags());
+        $this->assertSame(['action' => 'create'], $extraCallbackText);
     }
 
     /**
@@ -280,44 +189,22 @@ class SentryTargetTest extends Unit
      */
     public function testExportFailureIsIsolated()
     {
-        $sentryTarget = $this->getConfiguredSentryTarget();
-
         // an array tag value makes Scope::setTag() throw a TypeError
         $badMessage = ['message' => 'Bad tags', 'tags' => ['foo' => ['bar']]];
 
-        $sentEvents = [];
-        $sentExceptions = [];
-
-        $client = $this->createClientMock();
-        $client->expects($this->once())
-            ->method('captureException')
-            ->willReturnCallback(function (\Throwable $exception, ?Scope $scope = null) use (&$sentExceptions): ?EventId {
-                $sentExceptions[] = [$exception, $scope->applyToEvent(Event::createEvent())];
-
-                return EventId::generate();
-            });
-        $client->expects($this->once())
-            ->method('captureEvent')
-            ->willReturnCallback(function (Event $event) use (&$sentEvents): ?EventId {
-                $sentEvents[] = $event;
-
-                return EventId::generate();
-            });
-
-        SentrySdk::getCurrentHub()->bindClient($client);
-
-        $sentryTarget->collect([
+        $sent = $this->export([
             [$badMessage, Logger::LEVEL_INFO, 'application', 1481513561.197593, []],
             ['Good message', Logger::LEVEL_INFO, 'application', 1481513561.197593, []],
-        ], true);
+        ]);
 
-        [[$exception, $failureEvent]] = $sentExceptions;
+        [[$exception, $failureEvent]] = $sent['exceptions'];
         $this->assertInstanceOf(\TypeError::class, $exception);
         $this->assertSame('true', $failureEvent->getTags()['yii2_sentry_export_failure']);
         $this->assertSame('application', $failureEvent->getTags()['category']);
         $this->assertSame($badMessage, $failureEvent->getContexts()['yii2-sentry']['text']);
 
-        $this->assertSame('Good message', $sentEvents[0]->getMessage());
+        [[$event]] = $sent['events'];
+        $this->assertSame('Good message', $event->getMessage());
     }
 
     /**
@@ -329,7 +216,7 @@ class SentryTargetTest extends Unit
         $sentryTarget = $this->getConfiguredSentryTarget();
         $sentMessages = [];
 
-        $client = $this->createClientMock();
+        $client = $this->createMock(ClientInterface::class);
         $client->method('captureException')->willThrowException(new RuntimeException('Sentry is down'));
         $client->expects($this->once())
             ->method('captureEvent')
@@ -440,43 +327,58 @@ class SentryTargetTest extends Unit
     }
 
     /**
-     * Returns a Sentry client mock that can also be used to apply a Scope to an Event
+     * Exports log messages through a SentryTarget, with a mock Sentry client, and returns what was sent
      *
-     * @return ClientInterface|\PHPUnit\Framework\MockObject\MockObject
+     * @param array $messages log messages, as described in [[\yii\log\Logger::messages]]
+     * @param SentryTarget|null $sentryTarget defaults to [[getConfiguredSentryTarget()]]
+     * @return array with keys:
+     * - 'events': [Event, ?EventHint] for each captured event
+     * - 'exceptions': [Throwable, Event] for each captured exception
+     * The scope of each capture is applied to its Event.
      */
-    protected function createClientMock()
+    protected function export(array $messages, ?SentryTarget $sentryTarget = null): array
     {
+        // creating the target binds a real client, so it must be done before binding the mock
+        $sentryTarget = $sentryTarget ?? $this->getConfiguredSentryTarget();
+        $sent = ['events' => [], 'exceptions' => []];
+
         $client = $this->createMock(ClientInterface::class);
         // global event processors, run by Scope::applyToEvent(), read the client options
         $client->method('getOptions')->willReturn(new Options());
+        $client->method('captureEvent')
+            ->willReturnCallback(function (Event $event, ?EventHint $hint = null, ?Scope $scope = null) use (&$sent): ?EventId {
+                $sent['events'][] = [$scope->applyToEvent($event), $hint];
 
-        return $client;
+                return EventId::generate();
+            });
+        $client->method('captureException')
+            ->willReturnCallback(function (\Throwable $exception, ?Scope $scope = null) use (&$sent): ?EventId {
+                $sent['exceptions'][] = [$exception, $scope->applyToEvent(Event::createEvent())];
+
+                return EventId::generate();
+            });
+
+        SentrySdk::getCurrentHub()->bindClient($client);
+
+        $sentryTarget->collect($messages, true);
+
+        return $sent;
     }
 
     /**
-     * Returns reflected 'client' property
+     * Exports one INFO log message, checks that it was sent as exactly one event, and returns it
      *
-     * @param SentryTarget $sentryTarget
-     * @return \ReflectionProperty
+     * @param mixed $text the logged value
+     * @param SentryTarget|null $sentryTarget
+     * @return array [Event, ?EventHint]
      */
-    protected function getAccessibleClientProperty(SentryTarget $sentryTarget)
+    protected function exportOne($text, ?SentryTarget $sentryTarget = null): array
     {
-        $sentryTargetClass = new ReflectionClass("\Sentry\Client");
-        $clientProperty = $sentryTargetClass->getProperty('transport');
-        $clientProperty->setAccessible(true);
+        $sent = $this->export([[$text, Logger::LEVEL_INFO, 'application', 1481513561.197593, []]], $sentryTarget);
 
-        return $clientProperty;
-    }
+        $this->assertCount(1, $sent['events']);
+        $this->assertSame([], $sent['exceptions']);
 
-    /**
-     * Compatible version of creating mock method
-     *
-     * @param string $className
-     * @return \PHPUnit_Framework_MockObject_MockObject
-     */
-    protected function getMockCompatible($className)
-    {
-        return method_exists($this, 'createMock') ?
-            self::createMock($className) : $this->getMock($className);
+        return $sent['events'][0];
     }
 }

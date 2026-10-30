@@ -126,96 +126,32 @@ class SentryTarget extends Target
     {
         [$text, $level, $category] = $message;
 
+        $parsed = $this->parseText($text);
+
         $data = [
-            'message' => '',
-            'tags' => ['category' => $category],
-            'context' => [],
+            'message' => $parsed['message'],
+            'tags' => ArrayHelper::merge(['category' => $category], $parsed['tags']),
+            'context' => $parsed['context'],
+            'exception' => $parsed['exception'],
             'extra' => [],
-            'userData' => [],
+            'userData' => $this->collectUserData(),
         ];
 
-        $request = Yii::$app->getRequest();
-        if ($request instanceof Request && $request->getUserIP()) {
-            $data['userData']['ip_address'] = $request->getUserIP();
+        if ($parsed['messageType'] !== null) {
+            $data['tags']['log_message_type'] = $parsed['messageType'];
         }
 
-        try {
-            /** @var User $user */
-            $user = Yii::$app->has('user', true) ? Yii::$app->get('user', false) : null;
-            if ($user && ($identity = $user->getIdentity(false))) {
-                $data['userData']['id'] = $identity->getId();
-            }
-        } catch (Throwable $e) {
+        if ($this->context) {
+            $data['extra']['context'] = parent::getContextMessage();
         }
 
-        \Sentry\withScope(function (Scope $scope) use ($text, $level, $data) {
-            // the type of a message that is not a string, or 'none' if there is no message
-            $messageType = null;
-
-            if (is_array($text)) {
-                if (isset($text['tags'])) {
-                    $data['tags'] = ArrayHelper::merge($data['tags'], $text['tags']);
-                    unset($text['tags']);
-                }
-
-                if (isset($text['exception']) && $text['exception'] instanceof Throwable) {
-                    $data['exception'] = $text['exception'];
-                    unset($text['exception']);
-                }
-
-                // The first key found is the message. Any others are left in the context,
-                // so that e.g. ['message' => '...', 'error' => [...]] keeps both.
-                $messageKey = null;
-                foreach (['message', 'msg', 'error'] as $key) {
-                    if (isset($text[$key])) {
-                        $messageKey = $key;
-                        break;
-                    }
-                }
-
-                if ($messageKey === null) {
-                    $messageType = 'none';
-                    $data['message'] = $this->describeNonStringMessage($text);
-                } elseif ($text[$messageKey] instanceof Throwable) {
-                    $data['exception'] = $data['exception'] ?? $text[$messageKey];
-                    $data['message'] = $text[$messageKey]->getMessage();
-                    unset($text[$messageKey]);
-                } elseif (is_string($text[$messageKey]) || $text[$messageKey] instanceof Stringable) {
-                    $data['message'] = (string)$text[$messageKey];
-                    unset($text[$messageKey]);
-                } else {
-                    // Leave the value in the context, so that it still reaches Sentry.
-                    $messageType = get_debug_type($text[$messageKey]);
-                    $data['message'] = $this->describeNonStringMessage($text[$messageKey]);
-                }
-
-                $data['context'] = $text;
-            } elseif (is_string($text) || $text instanceof Stringable) {
-                $data['message'] = (string)$text;
-            } else {
-                $messageType = get_debug_type($text);
-                $data['message'] = $this->describeNonStringMessage($text);
-                $data['context'] = ['text' => $text];
-            }
-
-            if ($messageType !== null) {
-                $data['tags']['log_message_type'] = $messageType;
-            }
-
-            if ($this->context) {
-                $data['extra']['context'] = parent::getContextMessage();
-            }
-
-            $data = $this->runExtraCallback($text, $data);
+        \Sentry\withScope(function (Scope $scope) use ($text, $level, $data, $parsed) {
+            $data = $this->runExtraCallback($parsed['text'], $data);
 
             $scope->setUser($data['userData']);
             $scope->setContext('yii2-sentry', $data['context']);
             $data = $this->runTagCallback($data);
-            foreach ($data['tags'] as $key => $value) {
-                if ($value) {
-                    $scope->setTag($key, $value);
-                }
-            }
+            $this->applyTags($scope, $data['tags']);
 
             if ($text instanceof Throwable) {
                 \Sentry\captureException($text);
@@ -225,10 +161,162 @@ class SentryTarget extends Target
                 $event->setLevel($this->getLogLevel($level));
 
                 \Sentry\captureEvent($event, EventHint::fromArray(array_filter([
-                    'exception' => $data['exception'] ?? null,
+                    'exception' => $data['exception'],
                 ])));
             }
         });
+    }
+
+    /**
+     * Returns the IP address and ID of the current user, if available.
+     *
+     * @return array
+     */
+    protected function collectUserData(): array
+    {
+        $userData = [];
+
+        $request = Yii::$app->getRequest();
+        if ($request instanceof Request && $request->getUserIP()) {
+            $userData['ip_address'] = $request->getUserIP();
+        }
+
+        try {
+            /** @var User $user */
+            $user = Yii::$app->has('user', true) ? Yii::$app->get('user', false) : null;
+            if ($user && ($identity = $user->getIdentity(false))) {
+                $userData['id'] = $identity->getId();
+            }
+        } catch (Throwable $e) {
+        }
+
+        return $userData;
+    }
+
+    /**
+     * Splits the logged value into the parts of a Sentry event.
+     *
+     * @param mixed $text the logged value
+     *
+     * @return array with keys:
+     * - 'text': the logged value, without the keys that were used for other parts (for [[extraCallback]])
+     * - 'message': the event message
+     * - 'context': data for the 'yii2-sentry' context
+     * - 'tags': tags given with the message
+     * - 'exception': a Throwable given with the message, or null
+     * - 'messageType': the type of a message that is not a string, 'none' if there is no message, otherwise null
+     */
+    protected function parseText($text): array
+    {
+        if (is_array($text)) {
+            return $this->parseArrayText($text);
+        }
+
+        $parsed = [
+            'text' => $text,
+            'message' => '',
+            'context' => [],
+            'tags' => [],
+            'exception' => null,
+            'messageType' => null,
+        ];
+
+        if (is_string($text) || $text instanceof Stringable) {
+            $parsed['message'] = (string)$text;
+        } else {
+            $parsed['messageType'] = get_debug_type($text);
+            $parsed['message'] = $this->describeNonStringMessage($text);
+            $parsed['context'] = ['text' => $text];
+        }
+
+        return $parsed;
+    }
+
+    /**
+     * Splits a logged array into the parts of a Sentry event.
+     *
+     * @param array $text the logged array
+     *
+     * @return array as described in [[parseText()]]
+     */
+    protected function parseArrayText(array $text): array
+    {
+        $parsed = [
+            'message' => '',
+            'tags' => [],
+            'exception' => null,
+            'messageType' => null,
+        ];
+
+        if (isset($text['tags'])) {
+            $parsed['tags'] = $text['tags'];
+            unset($text['tags']);
+        }
+
+        if (isset($text['exception']) && $text['exception'] instanceof Throwable) {
+            $parsed['exception'] = $text['exception'];
+            unset($text['exception']);
+        }
+
+        $messageKey = $this->findMessageKey($text);
+        $value = $messageKey === null ? null : $text[$messageKey];
+
+        if ($messageKey === null) {
+            $parsed['messageType'] = 'none';
+            $parsed['message'] = $this->describeNonStringMessage($text);
+        } elseif ($value instanceof Throwable) {
+            $parsed['exception'] = $parsed['exception'] ?? $value;
+            $parsed['message'] = $value->getMessage();
+            unset($text[$messageKey]);
+        } elseif (is_string($value) || $value instanceof Stringable) {
+            $parsed['message'] = (string)$value;
+            unset($text[$messageKey]);
+        } else {
+            // Leave the value in the context, so that it still reaches Sentry.
+            $parsed['messageType'] = get_debug_type($value);
+            $parsed['message'] = $this->describeNonStringMessage($value);
+        }
+
+        $parsed['text'] = $text;
+        $parsed['context'] = $text;
+
+        return $parsed;
+    }
+
+    /**
+     * Returns the key of a logged array that holds the message, or null if there is none.
+     *
+     * The first key found is the message. Any others are left in the context,
+     * so that e.g. ['message' => '...', 'error' => [...]] keeps both.
+     *
+     * @param array $text the logged array
+     *
+     * @return string|null
+     */
+    protected function findMessageKey(array $text): ?string
+    {
+        foreach (['message', 'msg', 'error'] as $key) {
+            if (isset($text[$key])) {
+                return $key;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Sets the tags of a message on its Sentry scope, skipping empty values.
+     *
+     * @param Scope $scope
+     * @param array $tags
+     */
+    protected function applyTags(Scope $scope, array $tags)
+    {
+        foreach ($tags as $key => $value) {
+            if ($value) {
+                $scope->setTag($key, $value);
+            }
+        }
     }
 
     /**
