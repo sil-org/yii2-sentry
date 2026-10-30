@@ -9,6 +9,7 @@ use Sentry\ClientInterface;
 use Sentry\Event;
 use Sentry\EventHint;
 use Sentry\EventId;
+use Sentry\Options;
 use Sentry\SentrySdk;
 use Sentry\State\Scope;
 use Sil\Sentry\SentryTarget;
@@ -111,6 +112,92 @@ class SentryTargetTest extends Unit
     }
 
     /**
+     * A message that fails to export is reported, and does not stop the rest of the batch.
+     * @see SentryTarget::export
+     */
+    public function testExportFailureIsIsolated()
+    {
+        $sentryTarget = $this->getConfiguredSentryTarget();
+
+        // an array tag value makes Scope::setTag() throw a TypeError
+        $badMessage = ['message' => 'Bad tags', 'tags' => ['foo' => ['bar']]];
+
+        $sentEvents = [];
+        $sentExceptions = [];
+
+        $client = $this->createClientMock();
+        $client->expects($this->once())
+            ->method('captureException')
+            ->willReturnCallback(function (\Throwable $exception, ?Scope $scope = null) use (&$sentExceptions): ?EventId {
+                $sentExceptions[] = [$exception, $scope->applyToEvent(Event::createEvent())];
+
+                return EventId::generate();
+            });
+        $client->expects($this->once())
+            ->method('captureEvent')
+            ->willReturnCallback(function (Event $event) use (&$sentEvents): ?EventId {
+                $sentEvents[] = $event;
+
+                return EventId::generate();
+            });
+
+        SentrySdk::getCurrentHub()->bindClient($client);
+
+        $sentryTarget->collect([
+            [$badMessage, Logger::LEVEL_INFO, 'application', 1481513561.197593, []],
+            ['Good message', Logger::LEVEL_INFO, 'application', 1481513561.197593, []],
+        ], true);
+
+        [[$exception, $failureEvent]] = $sentExceptions;
+        $this->assertInstanceOf(\TypeError::class, $exception);
+        $this->assertSame('true', $failureEvent->getTags()['yii2_sentry_export_failure']);
+        $this->assertSame('application', $failureEvent->getTags()['category']);
+        $this->assertSame($badMessage, $failureEvent->getContexts()['yii2-sentry']['text']);
+
+        $this->assertSame('Good message', $sentEvents[0]->getMessage());
+    }
+
+    /**
+     * If reporting an export failure also fails, it goes to PHP's error log, and the rest of the batch is still sent.
+     * @see SentryTarget::export
+     */
+    public function testExportFailureReportFailureIsLogged()
+    {
+        $sentryTarget = $this->getConfiguredSentryTarget();
+        $sentMessages = [];
+
+        $client = $this->createClientMock();
+        $client->method('captureException')->willThrowException(new RuntimeException('Sentry is down'));
+        $client->expects($this->once())
+            ->method('captureEvent')
+            ->willReturnCallback(function (Event $event) use (&$sentMessages): ?EventId {
+                $sentMessages[] = $event->getMessage();
+
+                return EventId::generate();
+            });
+
+        SentrySdk::getCurrentHub()->bindClient($client);
+
+        $errorLog = tempnam(sys_get_temp_dir(), 'sentry-target-test');
+        $previousErrorLog = ini_set('error_log', $errorLog);
+        try {
+            $sentryTarget->collect([
+                // an array tag value makes Scope::setTag() throw a TypeError
+                [['message' => 'Bad tags', 'tags' => ['foo' => ['bar']]], Logger::LEVEL_INFO, 'application', 1481513561.197593, []],
+                ['Good message', Logger::LEVEL_INFO, 'application', 1481513561.197593, []],
+            ], true);
+            $logged = file_get_contents($errorLog);
+        } finally {
+            ini_set('error_log', $previousErrorLog);
+            unlink($errorLog);
+        }
+
+        $this->assertStringContainsString('unable to export a log message', $logged);
+        $this->assertStringContainsString('Sentry is down', $logged);
+        $this->assertSame(['Good message'], $sentMessages);
+    }
+
+    /**
      * Testing method getLevelName()
      * - returns level name for each logger level
      * @see SentryTarget::getLevelName
@@ -187,6 +274,20 @@ class SentryTargetTest extends Unit
         $sentryTarget->exportInterval = 100;
         $sentryTarget->setLevels(Logger::LEVEL_INFO);
         return $sentryTarget;
+    }
+
+    /**
+     * Returns a Sentry client mock that can also be used to apply a Scope to an Event
+     *
+     * @return ClientInterface|\PHPUnit\Framework\MockObject\MockObject
+     */
+    protected function createClientMock()
+    {
+        $client = $this->createMock(ClientInterface::class);
+        // global event processors, run by Scope::applyToEvent(), read the client options
+        $client->method('getOptions')->willReturn(new Options());
+
+        return $client;
     }
 
     /**

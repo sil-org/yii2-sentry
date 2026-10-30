@@ -97,92 +97,139 @@ class SentryTarget extends Target
     public function export()
     {
         foreach ($this->messages as $message) {
-            [$text, $level, $category] = $message;
-
-            $data = [
-                'message' => '',
-                'tags' => ['category' => $category],
-                'context' => [],
-                'extra' => [],
-                'userData' => [],
-            ];
-
-            $request = Yii::$app->getRequest();
-            if ($request instanceof Request && $request->getUserIP()) {
-                $data['userData']['ip_address'] = $request->getUserIP();
-            }
-
             try {
-                /** @var User $user */
-                $user = Yii::$app->has('user', true) ? Yii::$app->get('user', false) : null;
-                if ($user && ($identity = $user->getIdentity(false))) {
-                    $data['userData']['id'] = $identity->getId();
-                }
+                $this->exportMessage($message);
             } catch (Throwable $e) {
+                try {
+                    $this->reportExportFailure($e, $message);
+                } catch (Throwable $reportError) {
+                    // Sentry can't take the report either. Use PHP's error log, as throwing
+                    // would make Yii disable this target.
+                    error_log(sprintf(
+                        '%s: unable to export a log message (%s), or to report that to Sentry (%s)',
+                        static::class,
+                        $e->getMessage(),
+                        $reportError->getMessage()
+                    ));
+                }
+            }
+        }
+    }
+
+    /**
+     * Sends a single log message to Sentry.
+     *
+     * @param array $message the log message, as described in [[\yii\log\Logger::messages]]
+     */
+    protected function exportMessage(array $message)
+    {
+        [$text, $level, $category] = $message;
+
+        $data = [
+            'message' => '',
+            'tags' => ['category' => $category],
+            'context' => [],
+            'extra' => [],
+            'userData' => [],
+        ];
+
+        $request = Yii::$app->getRequest();
+        if ($request instanceof Request && $request->getUserIP()) {
+            $data['userData']['ip_address'] = $request->getUserIP();
+        }
+
+        try {
+            /** @var User $user */
+            $user = Yii::$app->has('user', true) ? Yii::$app->get('user', false) : null;
+            if ($user && ($identity = $user->getIdentity(false))) {
+                $data['userData']['id'] = $identity->getId();
+            }
+        } catch (Throwable $e) {
+        }
+
+        \Sentry\withScope(function (Scope $scope) use ($text, $level, $data) {
+            if (is_array($text)) {
+                if (isset($text['msg'])) {
+                    $data['message'] = (string)$text['msg'];
+                    unset($text['msg']);
+                }
+                if (isset($text['message'])) {
+                    $data['message'] = (string)$text['message'];
+                    unset($text['message']);
+                }
+                if (isset($text['error'])) {
+                    $data['message'] = (string)$text['error'];
+                    unset($text['error']);
+                }
+                // if none of the above have text, stringify the object
+                if (!isset($data['message'])) {
+                    $data['message'] = json_encode($text);
+                }
+
+                if (isset($text['tags'])) {
+                    $data['tags'] = ArrayHelper::merge($data['tags'], $text['tags']);
+                    unset($text['tags']);
+                }
+
+                if (isset($text['exception']) && $text['exception'] instanceof Throwable) {
+                    $data['exception'] = $text['exception'];
+                    unset($text['exception']);
+                }
+
+                $data['context'] = $text;
+            } else {
+                $data['message'] = (string)$text;
             }
 
-            \Sentry\withScope(function (Scope $scope) use ($text, $level, $data) {
-                if (is_array($text)) {
-                    if (isset($text['msg'])) {
-                        $data['message'] = (string)$text['msg'];
-                        unset($text['msg']);
-                    }
-                    if (isset($text['message'])) {
-                        $data['message'] = (string)$text['message'];
-                        unset($text['message']);
-                    }
-                    if (isset($text['error'])) {
-                        $data['message'] = (string)$text['error'];
-                        unset($text['error']);
-                    }
-                    // if none of the above have text, stringify the object
-                    if (!isset($data['message'])) {
-                        $data['message'] = json_encode($text);
-                    }
+            if ($this->context) {
+                $data['extra']['context'] = parent::getContextMessage();
+            }
 
-                    if (isset($text['tags'])) {
-                        $data['tags'] = ArrayHelper::merge($data['tags'], $text['tags']);
-                        unset($text['tags']);
-                    }
+            $data = $this->runExtraCallback($text, $data);
 
-                    if (isset($text['exception']) && $text['exception'] instanceof Throwable) {
-                        $data['exception'] = $text['exception'];
-                        unset($text['exception']);
-                    }
-
-                    $data['context'] = $text;
-                } else {
-                    $data['message'] = (string)$text;
+            $scope->setUser($data['userData']);
+            $scope->setContext('yii2-sentry', $data['context']);
+            $data = $this->runTagCallback($data);
+            foreach ($data['tags'] as $key => $value) {
+                if ($value) {
+                    $scope->setTag($key, $value);
                 }
+            }
 
-                if ($this->context) {
-                    $data['extra']['context'] = parent::getContextMessage();
-                }
+            if ($text instanceof Throwable) {
+                \Sentry\captureException($text);
+            } else {
+                $event = Event::createEvent();
+                $event->setMessage($data['message']);
+                $event->setLevel($this->getLogLevel($level));
 
-                $data = $this->runExtraCallback($text, $data);
+                \Sentry\captureEvent($event, EventHint::fromArray(array_filter([
+                    'exception' => $data['exception'] ?? null,
+                ])));
+            }
+        });
+    }
 
-                $scope->setUser($data['userData']);
-                $scope->setContext('yii2-sentry', $data['context']);
-                $data = $this->runTagCallback($data);
-                foreach ($data['tags'] as $key => $value) {
-                    if ($value) {
-                        $scope->setTag($key, $value);
-                    }
-                }
+    /**
+     * Reports a failure to export a log message, so that one bad message does not abort
+     * the rest of the batch or cause Yii to disable this target.
+     *
+     * @param Throwable $e the failure
+     * @param array $message the log message that could not be exported
+     */
+    protected function reportExportFailure(Throwable $e, array $message)
+    {
+        [$text, $level, $category] = $message;
 
-                if ($text instanceof Throwable) {
-                    \Sentry\captureException($text);
-                } else {
-                    $event = Event::createEvent();
-                    $event->setMessage($data['message']);
-                    $event->setLevel($this->getLogLevel($level));
-
-                    \Sentry\captureEvent($event, EventHint::fromArray(array_filter([
-                        'exception' => $data['exception'] ?? null,
-                    ])));
-                }
-            });
-        }
+        \Sentry\withScope(function (Scope $scope) use ($e, $text, $level, $category) {
+            $scope->setTag('category', (string)$category);
+            $scope->setTag('yii2_sentry_export_failure', 'true');
+            $scope->setContext('yii2-sentry', [
+                'level' => (string)$this->getLogLevel($level),
+                'text' => $text,
+            ]);
+            \Sentry\captureException($e);
+        });
     }
 
     /**
