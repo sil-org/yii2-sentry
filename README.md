@@ -46,6 +46,19 @@ Writing messages with extra data:
 ], 'category');
 ```
 
+When the logged value is an array, the event message is taken from the first of these keys that is set: `message`,
+`msg`, `error`. Other keys, including any of those three that weren't used as the message, are sent as context. If the
+message is a `Throwable`, its message text is used and the exception is attached to the event. An exception can also be
+passed in the `exception` key:
+
+```php
+\Yii::error([
+    'message' => 'Unable to save user',
+    'error' => $user->getFirstErrors(),
+    'exception' => $e,
+], 'category');
+```
+
 ### Extra callback
 
 `extraCallback` property can modify extra's data as callable function:
